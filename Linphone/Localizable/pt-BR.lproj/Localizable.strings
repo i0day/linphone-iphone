@@ -589,3 +589,5 @@
 "assistant_recover_email_account_label" = "Um e-mail";
 "assistant_recover_phone_number_account_label" = "Um número de telefone";
 "assistant_recover_phone_number_account_unavailable_no_push_warning" = "As notificações push não parecem estar disponíveis no seu dispositivo, mas são obrigatórias para recuperar uma conta de número de telefone no aplicativo móvel.";
+"history_list_filter_all" = "Todas as chamadas";
+"history_list_filter_missed" = "Perdida";

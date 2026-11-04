@@ -371,7 +371,7 @@
 "assistant_account_creation_sms_confirmation_explanation" = "Wir haben einen Bestätigungscode an Ihre Telefonnummer %@ gesendet. Bitte geben Sie unten den Bestätigungscode ein:";
 "assistant_dialog_confirm_phone_number_message" = "Möchten Sie wirklich die Telefonnummer %@ verwenden?";
 "assistant_dialog_general_terms_and_privacy_policy_message" = "Indem Sie fortfahren, akzeptieren Sie unsere %@ und %@.";
-"assistant_forgotten_password" = "Passwort vergessen?";
+"assistant_forgotten_password" = "Passwort vergessen oder nicht bekannt?";
 "assistant_invalid_uri_toast" = "Ungültige URI";
 "assistant_permissions_record_audio_title" = "**Audio aufnehmen:** Damit Ihr Gesprächspartner Sie hören kann und um Sprachnachrichten aufzunehmen.";
 "assistant_permissions_subtitle" = "Um %@ in vollem Umfang nutzen zu können, müssen Sie uns die folgenden Berechtigungen erteilen:";
@@ -631,3 +631,5 @@
 "assistant_forgotten_password_title" = "Passwort vergessen";
 "assistant_forgotten_password_subtitle" = "Wählen Sie aus, wie Sie Ihr Konto wiederherstellen möchten.";
 "assistant_forgotten_password_message" = "Sie haben Ihren Account erstellt mit:";
+"history_list_filter_all" = "Alle Anrufe";
+"history_list_filter_missed" = "Verpasst";
