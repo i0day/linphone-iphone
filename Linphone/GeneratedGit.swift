@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AppGitInfo {
-    public static let branch = "release/6.2"
-    public static let commit = "fc9756436"
+    public static let branch = "feat/push-apns-token-reporting"
+    public static let commit = "c03c25dbb"
     public static let tag = "6.2.4"
 }

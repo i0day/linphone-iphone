@@ -35,7 +35,9 @@ class EarlyPushkitDelegate: NSObject, PKPushRegistryDelegate, CXProviderDelegate
 	}
 
 	func pushRegistry(_ registry: PKPushRegistry, didUpdate pushCredentials: PKPushCredentials, for type: PKPushType) {
-		Log.info("[EarlyPushkitDelegate] Received push credentials, ignoring until core is ready")
+		Log.info("[EarlyPushkitDelegate] Received push credentials, reporting them until core is ready")
+		guard type == .voIP else { return }
+		PushTokenReporter.shared.report(pushCredentials.token, type: .voip)
 	}
 
 	func pushRegistry(_ registry: PKPushRegistry, didReceiveIncomingPushWith payload: PKPushPayload, for type: PKPushType, completion: @escaping () -> Void) {

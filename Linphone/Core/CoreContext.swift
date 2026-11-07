@@ -292,6 +292,8 @@ class CoreContext: ObservableObject {
 						MagicSearchSingleton.shared.recreateMagicSearch(core: core)
 					}
 
+					PushTokenReporter.shared.reportAll(core: core)
+
 					for account in core.accountList {
 						if account.params?.pushNotificationConfig?.provider != ("apns" + pushEnvironment) {
 							let newParams = account.params?.clone()
