@@ -10,7 +10,6 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.belledonne-communications.linphone</string>
 		<string>group.com.nypnk.linphone.linphoneExtension</string>
 		<string>group.com.nypnk.linphone.msgNotification</string>
 	</array>
