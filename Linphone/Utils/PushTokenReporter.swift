@@ -85,7 +85,7 @@ final class PushTokenReporter {
 			Log.warn("[PushTokenReporter] Ignoring \(type.rawValue) token, not 64 hex chars: \(token)")
 			return
 		}
-		guard let topic = Bundle.main.bundleIdentifier else {
+		guard let topic = Self.apnsTopic(for: type) else {
 			Log.warn("[PushTokenReporter] No bundle identifier, \(type.rawValue) token dropped")
 			return
 		}
@@ -218,6 +218,15 @@ final class PushTokenReporter {
 
 	private static func hexString(from data: Data) -> String {
 		data.map { String(format: "%02.2hhx", $0) }.joined()
+	}
+
+	/// The `apns-topic` Apple expects for a token type: the bundle id, plus the
+	/// `.voip` suffix a PushKit token requires. Apple rejects a VoIP push whose
+	/// topic lacks the suffix, so it is part of what gets registered rather than
+	/// something the backend has to reconstruct at send time.
+	private static func apnsTopic(for type: PushType) -> String? {
+		guard let bundleID = Bundle.main.bundleIdentifier else { return nil }
+		return type == .voip ? "\(bundleID).voip" : bundleID
 	}
 
 	/// Strip the `:remote` suffix the SDK appends and validate the hex.
