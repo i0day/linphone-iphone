@@ -6,11 +6,11 @@
 	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
-		<string>group.org.linphone.phone.msgNotification</string>
+		<string>group.com.nypnk.linphone.msgNotification</string>
 	</array>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>$(AppIdentifierPrefix)org.linphone.phone</string>
+		<string>$(AppIdentifierPrefix)com.nypnk.linphone</string>
 	</array>
 </dict>
 </plist>
