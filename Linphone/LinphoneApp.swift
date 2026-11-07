@@ -42,7 +42,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 			coreContext.doOnCoreQueue { core in
 				Log.info("Forwarding remote push token to core")
 				core.didRegisterForRemotePushWithStringifiedToken(deviceTokenStr: tokenStr + ":remote")
+				PushTokenReporter.shared.report(token: tokenStr, type: .alert, core: core)
 			}
+		} else {
+			PushTokenReporter.shared.report(token: tokenStr, type: .alert)
 		}
 	}
 	
@@ -63,6 +66,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 	func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
 		// Set up notifications
 		UNUserNotificationCenter.current().delegate = self
+		// Ask APNs for the notification token: without this the delegate method
+		// above never runs, so neither the core nor the backend ever learns it.
+		application.registerForRemoteNotifications()
 
 		return true
 	}
