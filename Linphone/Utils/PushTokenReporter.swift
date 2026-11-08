@@ -62,6 +62,7 @@ final class PushTokenReporter {
 	private var pending: [String: String] = [:]
 	private var sent = Set<String>()
 	private var bearerToken = ""
+	private var provisioningPasswords: [String: String] = [:]
 	private var restoredState = false
 
 	private init() {}
@@ -90,7 +91,7 @@ final class PushTokenReporter {
 			return
 		}
 
-		guard let core, let server = apiBaseURL(for: core), let credentials = sipCredentials(for: core) else {
+		guard let core, let server = apiBaseURL(for: core), let username = sipUsername(for: core) else {
 			park(type, token: hex)
 			return
 		}
@@ -100,7 +101,7 @@ final class PushTokenReporter {
 		clearPending(type)
 		Task { [weak self] in
 			guard let self = self else { return }
-			let uploaded = await self.upload(token: hex, type: type, apnsTopic: topic, server: server, credentials: credentials)
+			let uploaded = await self.upload(token: hex, type: type, apnsTopic: topic, server: server, username: username, core: core)
 			if !uploaded {
 				self.unmarkSent(key)
 			}
@@ -126,8 +127,9 @@ final class PushTokenReporter {
 	// MARK: - Networking
 
 	private func upload(token: String, type: PushType, apnsTopic: String, server: String,
-	                    credentials: (user: String, password: String)) async -> Bool {
-		guard let bearer = await bearerToken(from: server, credentials: credentials) else { return false }
+	                    username: String, core: Core) async -> Bool {
+		guard let password = await sipPassword(for: core, server: server, username: username) else { return false }
+		guard let bearer = await bearerToken(from: server, credentials: (username, password)) else { return false }
 
 		#if DEBUG
 		let environment = "development"
@@ -201,17 +203,110 @@ final class PushTokenReporter {
 		return Self.origin(from: Self.defaultAPIBaseURL)
 	}
 
-	/// The SIP credentials the core holds for an account, which is what the
-	/// backend matches a device against.
-	private func sipCredentials(for core: Core) -> (user: String, password: String)? {
-		for account in core.accountList {
-			guard let username = account.params?.identityAddress?.username, !username.isEmpty else { continue }
-			if let password = core.authInfoList.first(where: { $0.username == username })?.password, !password.isEmpty {
-				return (username, password)
-			}
+	/// The SIP username the core holds, which is what the backend matches a
+	/// device against.
+	private func sipUsername(for core: Core) -> String? {
+		if let username = core.accountList.compactMap({ $0.params?.identityAddress?.username }).first(where: { !$0.isEmpty }) {
+			return username
 		}
-		return core.authInfoList.first(where: { !($0.password ?? "").isEmpty })
-			.map { ($0.username ?? "", $0.password ?? "") }
+		return core.authInfoList.compactMap { $0.username }.first(where: { !$0.isEmpty })
+	}
+
+	/// The SIP password for a user, which `POST /auth/sip-login` exchanges for
+	/// the bearer token the device upload needs.
+	///
+	/// On iOS liblinphone moves the secret into the keychain and leaves the
+	/// in-memory `AuthInfo` empty, so neither `findAuthInfo()` nor
+	/// `authInfoList` can answer the question even though the account registers
+	/// correctly. The provisioning `.rc` the core was configured from carries the
+	/// secret in cleartext, which `voipsaas/provisioning.py` documents as the
+	/// intended source, so it is fetched and parsed when the core holds nothing.
+	/// The result is cached per user so repeated reports fetch it once.
+	private func sipPassword(for core: Core, server: String, username: String) async -> String? {
+		let cached = stateQueue.sync { provisioningPasswords[username] }
+		if let cached, !cached.isEmpty { return cached }
+		var password = Self.inMemoryPassword(for: core, username: username)
+		if password == nil, let url = Self.provisioningURL(from: core.provisioningUri, server: server, username: username) {
+			password = await Self.fetchText(from: url, session: session).flatMap { Self.password(inRc: $0, username: username) }
+		}
+		guard let password, !password.isEmpty else { return nil }
+		stateQueue.sync { provisioningPasswords[username] = password }
+		return password
+	}
+
+	/// The first non-empty password the core still exposes in memory, for the
+	/// platforms and configurations that keep it there.
+	private static func inMemoryPassword(for core: Core, username: String) -> String? {
+		if let account = core.accountList.first(where: { $0.params?.identityAddress?.username == username }),
+		   let password = account.findAuthInfo()?.password, !password.isEmpty {
+			return password
+		}
+		return core.authInfoList.first(where: { $0.username == username && !($0.password ?? "").isEmpty })?.password
+	}
+
+	/// The URL the `.rc` for a user is served from.
+	///
+	/// A provisioning URI is either the `.rc` itself (`https://host/provision/1000.rc`)
+	/// or the custom `linphone-config://` scheme wrapping that same URL, in which
+	/// case the remainder is the real one. When the core has no URI, the API host
+	/// stands in for it, which is where the backend serves it too.
+	private static func provisioningURL(from uri: String?, server: String, username: String) -> URL? {
+		let trimmed = (uri ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+		let prefix = "linphone-config://"
+		var candidates: [String] = []
+		if trimmed.lowercased().hasPrefix(prefix) {
+			candidates.append(String(trimmed.dropFirst(prefix.count)))
+		} else if trimmed.isEmpty == false {
+			candidates.append(trimmed)
+		}
+		candidates.append("\(server)/provision/\(username).rc")
+		for candidate in candidates {
+			guard let url = URL(string: candidate), let scheme = url.scheme?.lowercased(),
+			      scheme == "http" || scheme == "https" else { continue }
+			if url.pathExtension.lowercased() == "rc" || url.path.hasPrefix("/provision/") { return url }
+		}
+		return nil
+	}
+
+	/// The `password=` line belonging to a user in a Linphone `.rc`.
+	///
+	/// The file is an INI file with a global `[sip]` section and one
+	/// `[auth_info_N]` section per account, so a plain search for `password=`
+	/// would return the first account's secret on a multi-account config. The
+	/// section naming the user is read instead, falling back to `[sip]`.
+	private static func password(inRc contents: String, username: String) -> String? {
+		var sections: [String: [String: String]] = [:]
+		var current = ""
+		for line in contents.components(separatedBy: .newlines) {
+			let trimmed = line.trimmingCharacters(in: .whitespaces)
+			if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+				current = String(trimmed.dropFirst().dropLast())
+				continue
+			}
+			let parts = trimmed.split(separator: "=", maxSplits: 1)
+			guard parts.count == 2 else { continue }
+			let key = parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+			let value = parts[1].trimmingCharacters(in: .whitespaces)
+			if !value.isEmpty { sections[current, default: [:]][key] = value }
+		}
+		if let section = sections.values.first(where: { section in
+			["username", "userid", "auth_user"].contains(where: { section[$0] == username })
+		}), let password = section["password"] ?? section["passwd"] {
+			return password
+		}
+		return sections["sip"]?["password"] ?? sections["sip"]?["passwd"]
+	}
+
+	/// GET a small text file, or nil on any failure.
+	private static func fetchText(from url: URL, session: URLSession) async -> String? {
+		do {
+			let (data, response) = try await session.data(from: url)
+			guard let status = (response as? HTTPURLResponse)?.statusCode, (200...299).contains(status) else { return nil }
+			return String(data: data, encoding: .utf8)
+		} catch {
+			Log.warn("[PushTokenReporter] Provisioning fetch failed: \(error.localizedDescription)")
+			return nil
+		}
 	}
 
 	// MARK: - State
@@ -237,9 +332,16 @@ final class PushTokenReporter {
 	}
 
 	/// `https://host/path` -> `https://host`.
+	///
+	/// Only `http`/`https` URLs are accepted. A provisioning URL uses the
+	/// `linphone-config://` custom scheme, which is not a usable HTTP origin;
+	/// returning nil for it lets `apiBaseURL(for:)` fall through to the product
+	/// default instead of building an unreachable `linphone-config://.../api/v1`
+	/// request that URLSession rejects.
 	private static func origin(from value: String?) -> String? {
 		let trimmed = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-		guard let url = URL(string: trimmed), let scheme = url.scheme, let host = url.host else { return nil }
+		guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(), let host = url.host else { return nil }
+		guard scheme == "http" || scheme == "https" else { return nil }
 		return url.port.map { "\(scheme)://\(host):\($0)" } ?? "\(scheme)://\(host)"
 	}
 
