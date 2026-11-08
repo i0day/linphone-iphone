@@ -55,6 +55,8 @@ final class PushTokenReporter {
 	private static let pendingKey = "PushTokenReporter.pendingTokens"
 	private static let sentKey = "PushTokenReporter.sentTokens"
 	private static let bearerKey = "PushTokenReporter.bearerToken"
+	private static let voipTokenKey = "PushTokenReporter.voipToken"
+	private static let remoteTokenKey = "PushTokenReporter.remoteToken"
 
 	private let session = URLSession(configuration: .ephemeral)
 	private let stateQueue = DispatchQueue(label: "com.nypnk.linphone.PushTokenReporter")
@@ -62,12 +64,37 @@ final class PushTokenReporter {
 	private var pending: [String: String] = [:]
 	private var sent = Set<String>()
 	private var bearerToken = ""
+	private var cachedVoipToken = ""
+	private var cachedRemoteToken = ""
 	private var provisioningPasswords: [String: String] = [:]
 	private var restoredState = false
 
 	private init() {}
 
 	// MARK: - Reporting
+
+	/// The last VoIP token this device received from PushKit, or nil if PushKit
+	/// has not answered yet.
+	///
+	/// An account only advertises `pn-provider=apns` in its REGISTER Contact when
+	/// its params carry a VoIP token, and the core's own config is empty until
+	/// PushKit replies. Caching the token here lets an account be created (or
+	/// refreshed) with the binding as soon as the token is known, whichever of the
+	/// two delegates received it.
+	static var voipToken: String? {
+		let token = UserDefaults.standard.string(forKey: voipTokenKey) ?? ""
+		return token.isEmpty ? nil : token
+	}
+
+	/// The last notification (remote) token this device received from APNs, or nil
+	/// if APNs has not answered yet. Read by `AccountLoginViewModel` and
+	/// `CoreContext` to fill `pn-provider`/`pn-prid` for the alert half of the
+	/// binding, which the core otherwise only learns through
+	/// `didRegisterForRemotePushWithStringifiedToken`.
+	static var remoteToken: String? {
+		let token = UserDefaults.standard.string(forKey: remoteTokenKey) ?? ""
+		return token.isEmpty ? nil : token
+	}
 
 	/// Report the VoIP token from a `PKPushCredentials` object, sending it now
 	/// when a core is available and parking it otherwise.
@@ -89,6 +116,11 @@ final class PushTokenReporter {
 		guard let topic = Self.apnsTopic(for: type) else {
 			Log.warn("[PushTokenReporter] No bundle identifier, \(type.rawValue) token dropped")
 			return
+		}
+		if type == .voip {
+			cacheVoipToken(hex)
+		} else {
+			cacheRemoteToken(hex)
 		}
 
 		guard let core, let server = apiBaseURL(for: core), let username = sipUsername(for: core) else {
@@ -397,11 +429,35 @@ final class PushTokenReporter {
 		pending = UserDefaults.standard.dictionary(forKey: Self.pendingKey) as? [String: String] ?? [:]
 		sent = Set(UserDefaults.standard.stringArray(forKey: Self.sentKey) ?? [])
 		bearerToken = UserDefaults.standard.string(forKey: Self.bearerKey) ?? ""
+		cachedVoipToken = UserDefaults.standard.string(forKey: Self.voipTokenKey) ?? ""
+		cachedRemoteToken = UserDefaults.standard.string(forKey: Self.remoteTokenKey) ?? ""
 	}
 
 	private func persist() {
 		UserDefaults.standard.set(Array(sent).sorted(), forKey: Self.sentKey)
 		UserDefaults.standard.set(pending, forKey: Self.pendingKey)
 		UserDefaults.standard.set(bearerToken, forKey: Self.bearerKey)
+		UserDefaults.standard.set(cachedVoipToken, forKey: Self.voipTokenKey)
+		UserDefaults.standard.set(cachedRemoteToken, forKey: Self.remoteTokenKey)
+	}
+
+	/// Persist the VoIP token outside the instance cache so the static
+	/// `voipToken` reader and every other caller agree on one value.
+	private func cacheVoipToken(_ hex: String) {
+		stateQueue.sync {
+			restoreStateIfNeeded()
+			guard cachedVoipToken != hex else { return }
+			cachedVoipToken = hex
+			persist()
+		}
+	}
+
+	private func cacheRemoteToken(_ hex: String) {
+		stateQueue.sync {
+			restoreStateIfNeeded()
+			guard cachedRemoteToken != hex else { return }
+			cachedRemoteToken = hex
+			persist()
+		}
 	}
 }
