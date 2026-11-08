@@ -295,14 +295,44 @@ class CoreContext: ObservableObject {
 					PushTokenReporter.shared.reportAll(core: core)
 
 					for account in core.accountList {
-						if account.params?.pushNotificationConfig?.provider != ("apns" + pushEnvironment) {
-							let newParams = account.params?.clone()
-							
-							Log.info("Account \(String(describing: newParams?.identityAddress?.asStringUriOnly())) - updating apple push provider from \(String(describing: newParams?.pushNotificationConfig?.provider)) to apns\(pushEnvironment)")
-							newParams?.pushNotificationConfig?.provider = "apns" + pushEnvironment
-							
-							account.params = newParams
+						guard let params = account.params else { continue }
+						// When the core owns the PushKit registry it learns the tokens
+						// itself and exposes them here; the reporter's cache is what the
+						// app wrote while the early delegate still owned the registry.
+						// Prefer the core's value and fall back to the cache.
+						let cachedVoip = core.pushNotificationConfig?.voipToken
+							.flatMap { $0.isEmpty ? nil : $0 } ?? PushTokenReporter.voipToken
+						let cachedRemote = core.pushNotificationConfig?.remoteToken
+							.flatMap { $0.isEmpty ? nil : $0 }
+							.map { String($0.prefix(64)).uppercased() } ?? PushTokenReporter.remoteToken
+
+						// The REGISTER Contact only advertises the push binding when the
+						// account both allows push and its config carries the provider plus
+						// a token. Accounts created before the login flow started writing
+						// the token have the provider but no token, so their Contact is
+						// bare and FreeSWITCH cannot wake the device.
+						let providerWrong = params.pushNotificationConfig?.provider != ("apns" + pushEnvironment)
+						let voipWrong = params.pushNotificationConfig?.voipToken != cachedVoip
+						let remoteWrong = params.pushNotificationConfig?.prid != cachedRemote?.uppercased()
+						let allowedWrong = cachedVoip != nil && !params.pushNotificationAllowed
+
+						guard providerWrong || voipWrong || remoteWrong || allowedWrong else { continue }
+
+						Log.info("Account \(params.identityAddress?.asStringUriOnly() ?? "?") - refreshing push config:"
+							+ " provider \(params.pushNotificationConfig?.provider ?? "nil") -> apns\(pushEnvironment),"
+							+ " voip token \(cachedVoip == nil ? "still unknown" : "supplied"), allowed \(params.pushNotificationAllowed)")
+
+						let newParams = params.clone()
+						newParams?.pushNotificationConfig?.provider = "apns" + pushEnvironment
+						if let voip = cachedVoip {
+							newParams?.pushNotificationConfig?.voipToken = voip
+							newParams?.pushNotificationAllowed = true
 						}
+							if let remote = cachedRemote {
+								newParams?.pushNotificationConfig?.prid = remote
+							newParams?.remotePushNotificationAllowed = true
+						}
+						account.params = newParams
 					}
 					
 					let pendingActions = self.actionsToPerformOnCoreQueueWhenCoreIsStarted

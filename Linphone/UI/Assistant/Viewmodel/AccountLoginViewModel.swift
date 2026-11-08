@@ -141,7 +141,13 @@ class AccountLoginViewModel: ObservableObject {
 				// And we ensure the account will start the registration process
 				accountParams.registerEnabled = true
 				
-				if accountParams.pushNotificationAllowed {
+				// `pushNotificationAllowed` gates whether the REGISTER Contact carries
+				// the push binding at all, and it defaults to false. The previous check
+				// read that same flag before writing it, so it only ever re-affirmed an
+				// account that already had it and never enabled a new one. Ask the SDK
+				// whether push is available on this platform, and treat a token we have
+				// already received as proof that it is.
+				if accountParams.isPushNotificationAvailable || PushTokenReporter.voipToken != nil {
 					accountParams.pushNotificationAllowed = true
 					accountParams.remotePushNotificationAllowed = true
 				}
@@ -150,7 +156,21 @@ class AccountLoginViewModel: ObservableObject {
 #else
 				let pushEnvironment = ""
 #endif
-				accountParams.pushNotificationConfig?.provider = "apns" + pushEnvironment
+				// The REGISTER Contact only carries the push binding when the params
+				// hold a provider *and* a token. Setting the provider alone leaves the
+				// Contact bare, so FreeSWITCH never learns it can wake this device and
+				// an inbound call can only ring while the app is already awake.
+				// `configureAccount` runs before the core exists, so the core's own
+				// config is empty here; read the tokens the app already received.
+				if let config = accountParams.pushNotificationConfig {
+					config.provider = "apns" + pushEnvironment
+					if let voip = PushTokenReporter.voipToken {
+						config.voipToken = voip
+					}
+					if config.prid == nil, let remote = PushTokenReporter.remoteToken {
+						config.prid = remote.uppercased()
+					}
+				}
 				
 				self.mCoreDelegate = CoreDelegateStub(onAccountRegistrationStateChanged: { (core: Core, account: Account, state: RegistrationState, message: String) in
 					
