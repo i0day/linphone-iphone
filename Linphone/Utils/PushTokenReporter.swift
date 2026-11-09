@@ -183,7 +183,10 @@ final class PushTokenReporter {
 				Log.error("[PushTokenReporter] SIP login failed with HTTP \(status)")
 				return nil
 			}
-			stateQueue.sync { bearerToken = token }
+			stateQueue.sync {
+				bearerToken = token
+				persist()
+			}
 			return token
 		} catch let error {
 			Log.error("[PushTokenReporter] SIP login failed: \(error.localizedDescription)")
