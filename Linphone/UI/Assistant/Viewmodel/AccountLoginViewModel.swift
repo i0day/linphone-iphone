@@ -140,6 +140,11 @@ class AccountLoginViewModel: ObservableObject {
 				
 				// And we ensure the account will start the registration process
 				accountParams.registerEnabled = true
+				// Ask for the longest registration the registrar accepts. The value
+				// comes from AppServices rather than the XML defaults the login flow
+				// just loaded, which seed 3600 for every domain other than
+				// sip.linphone.org.
+				accountParams.expires = AppServices.registrationExpiresSeconds
 				
 				// `pushNotificationAllowed` gates whether the REGISTER Contact carries
 				// the push binding at all, and it defaults to false. The previous check
@@ -164,6 +169,8 @@ class AccountLoginViewModel: ObservableObject {
 				// config is empty here; read the tokens the app already received.
 				if let config = accountParams.pushNotificationConfig {
 					config.provider = "apns" + pushEnvironment
+					config.teamId = AppServices.apnsTeamID
+					config.param = AppServices.apnsPnParam
 					if let voip = PushTokenReporter.voipToken {
 						config.voipToken = voip
 					}

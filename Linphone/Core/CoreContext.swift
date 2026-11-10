@@ -312,18 +312,27 @@ class CoreContext: ObservableObject {
 						// the token have the provider but no token, so their Contact is
 						// bare and FreeSWITCH cannot wake the device.
 						let providerWrong = params.pushNotificationConfig?.provider != ("apns" + pushEnvironment)
+						let teamWrong = params.pushNotificationConfig?.teamId != AppServices.apnsTeamID
+						let paramWrong = params.pushNotificationConfig?.param != AppServices.apnsPnParam
 						let voipWrong = params.pushNotificationConfig?.voipToken != cachedVoip
 						let remoteWrong = params.pushNotificationConfig?.prid != cachedRemote?.uppercased()
 						let allowedWrong = cachedVoip != nil && !params.pushNotificationAllowed
+						let expiresWrong = params.expires != AppServices.registrationExpiresSeconds
 
-						guard providerWrong || voipWrong || remoteWrong || allowedWrong else { continue }
+						guard providerWrong || teamWrong || paramWrong || voipWrong || remoteWrong || allowedWrong || expiresWrong else { continue }
 
 						Log.info("Account \(params.identityAddress?.asStringUriOnly() ?? "?") - refreshing push config:"
 							+ " provider \(params.pushNotificationConfig?.provider ?? "nil") -> apns\(pushEnvironment),"
+							+ " team \(params.pushNotificationConfig?.teamId ?? "nil") -> \(AppServices.apnsTeamID),"
+							+ " param \((params.pushNotificationConfig?.param ?? "nil").prefix(40)) -> \(AppServices.apnsPnParam),"
+							+ " expires \(params.expires) -> \(AppServices.registrationExpiresSeconds),"
 							+ " voip token \(cachedVoip == nil ? "still unknown" : "supplied"), allowed \(params.pushNotificationAllowed)")
 
 						let newParams = params.clone()
 						newParams?.pushNotificationConfig?.provider = "apns" + pushEnvironment
+						newParams?.pushNotificationConfig?.teamId = AppServices.apnsTeamID
+						newParams?.pushNotificationConfig?.param = AppServices.apnsPnParam
+						newParams?.expires = AppServices.registrationExpiresSeconds
 						if let voip = cachedVoip {
 							newParams?.pushNotificationConfig?.voipToken = voip
 							newParams?.pushNotificationAllowed = true
@@ -687,6 +696,38 @@ class CoreContext: ObservableObject {
 }
 
 enum AppServices {
+
+	/// Apple developer team the app is signed with, the same value as
+	/// `DEVELOPMENT_TEAM` in the Xcode project.
+	///
+	/// liblinphone only advertises the APNs binding in the REGISTER Contact when
+	/// the account's push config names a team, and it falls back to the
+	/// `ABCD1234` placeholder shipped in the SDK when nothing sets one. Flexisip
+	/// then hands Apple a `pn-param` that does not match this app's signing team
+	/// and the VoIP push is dropped, so the phone never wakes for an inbound
+	/// call. `CorePreferences.teamID` reads `[app] team_id`, which the bundled
+	/// factory rc leaves empty; pinning it here covers both account-config sites.
+	static let apnsTeamID = "475F79X78M"
+
+	/// Registration lifetime, in seconds, the app asks the registrar for.
+	///
+	/// Flexisip caps `max-expires` at 86400 and the provisioning `.rc` written by
+	/// the backend pins the same value, but the app used to seed 3600, so the
+	/// binding expired hours before the push it exists for did.
+	static let registrationExpiresSeconds = 86400
+
+	/// The `pn-param` the REGISTER Contact advertises for this device.
+	///
+	/// liblinphone composes it as `<team id>.<bundle id>` plus the push types the
+	/// account advertises, and `param` wins over `team_id`: the SDK header states
+	/// `set_team_id` "is not necessary if param is set", so an account whose
+	/// persisted config already carries a param keeps advertising the SDK's
+	/// `ABCD1234` placeholder no matter what `teamId` says. Writing the whole
+	/// string leaves nothing for the placeholder to override.
+	static var apnsPnParam: String {
+		"\(apnsTeamID).\(Bundle.main.bundleIdentifier ?? "com.nypnk.linphone").voip&remote"
+	}
+
 	private static var _config: Config?
 	private static let configLock = NSLock()
 
